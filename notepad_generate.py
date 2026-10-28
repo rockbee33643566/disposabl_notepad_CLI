@@ -3,17 +3,10 @@ import os
 import json
 from typing import Iterable, Literal
 
-DIR_NAME = "./notepade"
-
-# try:
-#     os.mkdir(DIR_NAME)
-# except FileExistsError:
-#     pass
-
 def generate_notepad(
-        type: Literal["let", "num"] = "num",
-        leninght: int = 360 
-    ) -> Iterable[int | str]:
+    type: Literal["let", "num"] = "num",
+    leninght: int = 360 
+) -> Iterable[int | str]:
     alphabet = [" ", ]
     alphabet_let = list(
         chr(i) for i in range(ord("а"), ord("я") + 1)
@@ -21,32 +14,43 @@ def generate_notepad(
     alphabet.extend(alphabet_let)
 
     if type == "num":
-        return [secrets.randbelow(len(alphabet)) for _ in range(leninght)]
+        return generate_num_notepad(
+            leninght=leninght, 
+            inclusive_upper_bound=len(alphabet)
+        )
     elif type == "let":
-        return [secrets.choice(alphabet) for _ in range(leninght)]
+        return generate_text_notepad(
+            leninght=leninght, 
+            alphabet=alphabet
+        )
     else:
         raise ValueError(f"type не принимает значение: {type}")
 
+def generate_num_notepad(
+    leninght: int, 
+    inclusive_upper_bound: int
+) -> Iterable[str]:
+    return [secrets.randbelow(inclusive_upper_bound + 1) for _ in range(leninght)]
+
+def generate_text_notepad(
+    leninght: int, 
+    alphabet: list[str]
+) -> Iterable[int]:
+    return [secrets.choice(alphabet) for _ in range(leninght)]
+
 def save(
-        notepad: Iterable,
-        name: str | None = None,
-        path: str | None = None
-    ) -> None:
-    if path:
-        name = path[:-5] + ".json"
-    elif name is None:
+    notepad: Iterable,
+    name: str | None = None
+) -> None:
+    if name is None:
         name = "notepad"
 
-    if path is None:
-        path = f"./notepad.json"
-
+    path = f"./{name}.json"
     id = 0
-    used = 0
 
     data = {
         "id": id,
         "values": notepad,
-        "used": used
     }
     count = 1
 
@@ -57,7 +61,6 @@ def save(
     with open(path, "w", encoding="utf-8") as file:
         json.dump(data, file, ensure_ascii=False, indent=4)
 
-
 if __name__ == "__main__":
-    notepad = generate_notepad()
+    notepad = generate_notepad(type="num", leninght=12456)
     save(notepad)
