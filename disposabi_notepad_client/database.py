@@ -19,9 +19,13 @@ def get_conn(
 
     try:
         yield conn
-    finally:
+    except Exception:
+        conn.rollback()
+        raise
+    else:
         if commit:
             conn.commit()
+    finally:
         conn.close()
 
 def init_db() -> None: 
@@ -29,27 +33,33 @@ def init_db() -> None:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER UNGUE, 
                 user_name TEXT, 
                 hash TEXT UNQUE
             )
         ''')
 
         conn.execute('''
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                sender_id INTEGER, 
-                text TEXT, 
-                time REAL, 
-                used_notepad INTEGER, 
-                is_readed INTEGER CHECK (is_readed IN (0, 1))
-            )
+            CREATE TABLE IF NOT EXISTS
+                messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sender_id INTEGER,
+                    text TEXT,
+                    TIME REAL,
+                    used_notepad INTEGER,
+                    is_readed INTEGER CHECK (is_readed IN (0, 1))
+                )
         ''')
 
 def create_user(usr: user.CreateUserPost, user_id: int) -> None:
-    with get_conn() as conn:
+    with get_conn(commit=True) as conn:
         cursor = conn.cursor()
 
-        cursor.execute(
-            "INSERT INTO users ()"
+        cursor.execute('''
+            INSERT INTO users(user_id, user_name, hash)
+            VALUES
+                (?, ?, ?)
+            ''', 
+            (user_id, usr.name, usr.hash)
         )
         
