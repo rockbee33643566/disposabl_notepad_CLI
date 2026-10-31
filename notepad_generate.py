@@ -45,7 +45,7 @@ def save(
     if name is None:
         name = "notepad"
 
-    path = f"./{name}.json"
+    path = os.path.join("data", f"{name}.json")
     id = 0
 
     data = {
@@ -55,7 +55,7 @@ def save(
     count = 1
 
     while os.path.isfile(path):
-        path = f"{name}{count}.json"
+        path = os.path.join("data", f"{name}{id}.json")
         count += 1
 
     with open(path, "w", encoding="utf-8") as file:
