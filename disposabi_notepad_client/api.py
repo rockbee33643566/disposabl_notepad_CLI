@@ -1,6 +1,6 @@
 import requests
 
-from schemas import user, message
+from .schemas import user, message
 
 class API:
     def __init__(self, base_url: str):
@@ -22,7 +22,7 @@ class API:
         params = {"id": id}
 
         response = requests.get(
-            path=self.base_url + path, 
+            url=self.base_url + path, 
             params=params
         )
         response.raise_for_status()
@@ -36,7 +36,7 @@ class API:
         json = msg.model_dump()
 
         response = requests.post(
-            path=self.base_url + path, 
+            url=self.base_url + path, 
             json=json
         )
         response.raise_for_status()
@@ -46,7 +46,7 @@ class API:
         params = {"user_hash": user_hash}
 
         response = requests.get(
-            path = self.base_url + path, 
+            url=self.base_url + path, 
             params=params
         )
         response.raise_for_status()
