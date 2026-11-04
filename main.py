@@ -2,8 +2,10 @@ from disposabi_notepad_client import (
     config, 
     utl,
     encryption,
-    database, 
-    API,
+    Database,
+    UserRepo,
+    init_db,
+    ClientApi,
     Client, 
     CLI
 )
@@ -15,10 +17,12 @@ def main():
     if conf.first_launch: 
         first_launch()
 
-    database.init_db()
+    db = Database()
+    init_db(db=db)
+    user_repo = UserRepo(db)
 
-    api = API(conf.host)
-    client = Client(api)
+    api = ClientApi(conf.host)
+    client = Client(api, db, user_repo)
     cli = CLI(client=client, config=conf)
 
     try:

@@ -6,8 +6,6 @@ class CLI:
         self.client = client
         self.config = config
 
-        self.user_local_id: int
-
         self.running = True
 
     def main(self) -> None: 
@@ -26,18 +24,18 @@ class CLI:
             return self.switch_user()
             
         if len(accounts.accounts) == 1:
-            self.user_local_id = accounts.accounts[0].id
-            return
-        
-     
-        print("Выберите аккаунт")
+            user_local_id = accounts.accounts[0].id
+        else:
+            print("Выберите аккаунт")
 
-        for i, acc in enumerate(accounts.accounts):
-            print(f"{i}) {acc.user_name}: {acc.user_id}")
-        print()
-        acc_index = int(input("Ваш выбор: "))
+            for i, acc in enumerate(accounts.accounts):
+                print(f"{i}) {acc.user_name}: {acc.user_id}")
 
-        self.user_local_id = accounts.accounts[acc_index].id
+            acc_index = int(input("Ваш выбор: "))
+
+            user_local_id = accounts.accounts[acc_index].id
+
+        self.client.open_session(user_local_id)
 
     def first_launch(self):
         self.create_user()
@@ -55,13 +53,15 @@ class CLI:
         print("2) Проверить сообщения")
         print("3) Сменить пользавателя")
         print("4) Создать пользавателя")
+        print("0) Выход")
 
     def menu(self) -> None:
         menu_actions = {
             "1": self.send_message, 
             "2": self.check_messages,
             "3": self.switch_user,
-            "4": self.create_user
+            "4": self.create_user,
+            "0": lambda: setattr(self, "running", False)
         }
         self.display_menu()
 
@@ -75,12 +75,11 @@ class CLI:
 
         self.client.send_message(
             text=text, 
-            user_local_id=self.user_local_id, 
             recipient_id=recipient_id
         )
 
     def check_messages(self): 
-        messages = self.client.check_messages(self.user_local_id)
+        messages = self.client.check_messages()
         if messages is None:
             print("Вам не приходило сообщений")
             return
@@ -88,5 +87,3 @@ class CLI:
         print("Сообщения: ")
         for msg in messages.messages:
             print(f"=== от: {msg.sender_id}\n{msg.text}\n")
-
-        

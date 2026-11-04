@@ -1,20 +1,17 @@
-import requests
+from requests import Session
 
 from .schemas import user, message
 
-class API:
+class ClientApi:
     def __init__(self, base_url: str):
         self.base_url = base_url
-        self._user_hash: str
-
-    def set_user_hash(self, hash: str) -> None:
-        self._user_hash = hash
+        self.http = Session()
 
     def create_user(self, usr: user.CreateUserPost) -> int: 
         path = "/user/create"
         json = usr.model_dump()
 
-        response = requests.post(self.base_url + path, json=json)
+        response = self.http.post(self.base_url + path, json=json)
         response.raise_for_status()
 
         data = response.json()
@@ -25,7 +22,7 @@ class API:
         path = "/user/is_exists"
         params = {"id": id}
 
-        response = requests.get(
+        response = self.http.get(
             url=self.base_url + path, 
             params=params
         )
@@ -35,21 +32,37 @@ class API:
 
         return data
 
-    def send_message(self, msg: message.MessageSend) -> None:
+class UserAPI:
+    def __init__(
+            self, 
+            base_url: str,  
+            http: Session,
+            user_hash: str):
+        self.base_url = base_url
+        self._user_hash = user_hash
+        self.http = http
+
+    def send_message(self, text: str, recipient_id: int, used_notepad: int | None) -> None:
         path = "/message/send"
+        msg = message.MessageSend(
+                    text=text, 
+                    sender_hash=self._user_hash, 
+                    recipient_id=recipient_id, 
+                    used_notepad=used_notepad
+                )
         json = msg.model_dump()
 
-        response = requests.post(
+        response = self.http.post(
             url=self.base_url + path, 
             json=json
         )
         response.raise_for_status()
 
-    def check_messages(self, user_hash: str) -> message.MessagesGet: 
+    def check_messages(self) -> message.MessagesGet: 
         path = "/message/get"
-        params = {"user_hash": user_hash}
+        params = {"user_hash": self._user_hash}
 
-        response = requests.get(
+        response = self.http.get(
             url=self.base_url + path, 
             params=params
         )

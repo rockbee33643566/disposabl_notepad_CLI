@@ -22,7 +22,7 @@ class Accounts(BaseModel):
 
 class Contact(BaseModel):
     user_id: int
-    name: int
+    name: str
 
 class Contacts(BaseModel): 
     contacts: list[Contact]
