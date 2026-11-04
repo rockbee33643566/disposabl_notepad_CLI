@@ -1,10 +1,12 @@
-import sqlite3
-from sqlite3 import Connection
+from sqlcipher3 import dbapi2
+
+from sqlite3 import Connection, Row
 from contextlib import contextmanager
 from typing import Generator
 from pathlib import Path
 
 from .schemas import user, message
+from .encryption.encryption import get_db_key
 
 @contextmanager
 def get_conn(
@@ -15,11 +17,19 @@ def get_conn(
         path = str(
             Path(__file__).parent.parent / "data" / "database.db"
         )
-        
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+
+    conn: Connection
+    conn = dbapi2.connect(path)
 
     try:
+        conn.row_factory = dbapi2.Row
+
+        cursor = conn.cursor()
+        cursor.execute(f'''--sql
+            PRAGMA key = '{get_db_key()}'
+        ''')
+        cursor.close()
+        
         yield conn
     except Exception:
         conn.rollback()
@@ -46,6 +56,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS
                 contacts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    master_id INTEGER NOT NULL,
                     user_id INTEGER NOT NULL, 
                     name TEXT
                 )
@@ -100,7 +111,7 @@ def get_user_hash(id: int) -> str:
         row = cursor.fetchone()
     return row["hash"]
 
-def get_accounts() -> user.Accounts:
+def get_accounts() -> user.Accounts | None:
     with get_conn() as conn:
         cursor = conn.cursor()
 
@@ -109,7 +120,11 @@ def get_accounts() -> user.Accounts:
         ''')
 
         row = cursor.fetchall()
-    return user.Accounts(accounts=[dict(i) for i in row])
+
+    if not row:
+        return None
+    else:
+        return user.Accounts(accounts=[dict(i) for i in row])
 
 def add_received_messages(msg: message.MessagesGet) -> None:
     data = [
@@ -157,3 +172,57 @@ def add_sendet_message(msg: message.SendedMessage) -> None:
             ''',
             data
         )
+
+def add_contact(user_local_id: int, user_id: int, name: str) ->  None: 
+    with get_conn(commit=True) as conn: 
+        cursor = conn.cursor()
+        cursor.execute('''--sql
+            INSERT INTO contacts (
+                user_id, 
+                master_id,
+                name
+            )
+            VALUES
+                (?, ?, ?)
+            ''',
+            (user_id, user_local_id, name)
+        )
+
+def get_contact(user_id: int) -> user.Accounts | None:
+    with get_conn() as conn: 
+        cursor = conn.cursor()
+        cursor.execute('''--sql
+            SELECT user_id, name FROM contacts 
+            WHERE master_id = ?
+            ''', 
+            (user_id, )
+        )
+
+        row = cursor.fetchall()
+
+    if not row: 
+        return None
+    else: 
+        return user.Contacts(contacts=[dict(i) for i in row])
+
+
+# ===== AI =====
+def get_history(user_id: int, peer_id: int) -> list[message.SendedMessage]:
+    with get_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('''--sql
+            SELECT sender_id, text, time, used_notepad FROM received_messages
+            WHERE sender_id = ?
+        ''', (peer_id,))
+        incoming = [message.Message(**dict(r)) for r in cursor.fetchall()]
+        
+        cursor.execute('''--sql
+            SELECT recipient_id, text, time, used_notepad FROM sendet_messages
+            WHERE recipient_id = ?
+        ''', (user_id,))
+        outgoing = [message.SendedMessage(**dict(r)) for r in cursor.fetchall()]
+
+    combined = incoming + outgoing
+    combined.sort(key=lambda m: m.time)
+    return combined

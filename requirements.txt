@@ -1,2 +1,5 @@
 pydantic
-requests 
+requests
+sqlcipher3
+keyring
+textual

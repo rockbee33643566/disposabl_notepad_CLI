@@ -19,3 +19,10 @@ class Account(BaseModel):
 
 class Accounts(BaseModel):
     accounts: list[Account]
+
+class Contact(BaseModel):
+    user_id: int
+    name: int
+
+class Contacts(BaseModel): 
+    contacts: list[Contact]

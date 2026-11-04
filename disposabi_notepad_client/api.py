@@ -5,6 +5,10 @@ from .schemas import user, message
 class API:
     def __init__(self, base_url: str):
         self.base_url = base_url
+        self._user_hash: str
+
+    def set_user_hash(self, hash: str) -> None:
+        self._user_hash = hash
 
     def create_user(self, usr: user.CreateUserPost) -> int: 
         path = "/user/create"

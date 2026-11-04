@@ -1,6 +1,5 @@
 from .client import Client
 from .config import Config
-from . import config
 
 class CLI:
     def __init__(self, client: Client, config: Config):
@@ -22,21 +21,26 @@ class CLI:
     def switch_user(self) -> None:
         accounts = self.client.get_accounts()
 
-        if len(accounts.accounts) <= 1:
+        if accounts is None:
+            self.create_user()
+            return self.switch_user()
+            
+        if len(accounts.accounts) == 1:
             self.user_local_id = accounts.accounts[0].id
-        else:
-            print("Выберите аккаунт")
+            return
+        
+     
+        print("Выберите аккаунт")
 
-            for i, acc in enumerate(accounts.accounts):
-                print(f"{i}) {acc.user_name}: {acc.user_id}")
-            print()
-            acc_index = int(input("Ваш выбор: "))
+        for i, acc in enumerate(accounts.accounts):
+            print(f"{i}) {acc.user_name}: {acc.user_id}")
+        print()
+        acc_index = int(input("Ваш выбор: "))
 
-            self.user_local_id = accounts.accounts[acc_index].id
+        self.user_local_id = accounts.accounts[acc_index].id
 
     def first_launch(self):
         self.create_user()
-        config.edit_config()
         
 
     def create_user(self): 
@@ -77,7 +81,7 @@ class CLI:
 
     def check_messages(self): 
         messages = self.client.check_messages(self.user_local_id)
-        if not messages.messages:
+        if messages is None:
             print("Вам не приходило сообщений")
             return
 
