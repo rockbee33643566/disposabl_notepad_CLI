@@ -21,13 +21,14 @@ class Database:
         self._conn = aiosqlite.connect(
             path, isolation_level=None, check_same_thread=False
         )
-        self._conn.row_factory = aiosqlite.Row
         self._initialized = False
         
 
     async def _ensure_initialized(self) -> None:
         if not self._initialized:
             await self._conn.__aenter__()
+            
+            self._conn.row_factory = sqlcipher3.dbapi2.Row
             await self._conn.execute(f'''--sql
                 PRAGMA key = '{get_db_key()}'
             ''')

@@ -63,11 +63,12 @@ class AccountSelectScreen(Screen):
         self.app.title = "Мессенджер"
         self.refresh_accounts()
 
-    def refresh_accounts(self) -> None:
+    @work(exclusive=True, group="accounts")
+    async def refresh_accounts(self) -> None:
         lv = self.query_one("#accounts", ListView)
         lv.clear()
         try:
-            accounts: Optional[user.Accounts] = self.app.client.get_accounts()
+            accounts: Optional[user.Accounts] = await self.app.client.get_accounts()
         except Exception as e:
             self.app.notify(_format_exception(e), severity="error", title="Ошибка аккаунтов")
             return
@@ -86,12 +87,16 @@ class AccountSelectScreen(Screen):
         name = inp.value.strip()
         if not name:
             return
+        self._create_account(name)
+
+    @work(exclusive=True, group="create-account")
+    async def _create_account(self, name: str) -> None:
         try:
-            self.app.client.create_user(name)
+            await self.app.client.create_user(name)
         except Exception as e:
             self.app.notify(_format_exception(e), severity="error", title="Ошибка создания")
             return
-        inp.value = ""
+        self.query_one("#new-name", Input).value = ""
         self.refresh_accounts()
 
     @on(ListView.Selected, "#accounts")
@@ -141,14 +146,14 @@ class MainScreen(Screen):
     def _refresh_btn(self) -> None:
         self.refresh_chats()
 
-    @work(thread=True, exclusive=True, group="chats")
-    def refresh_chats(self) -> None:
+    @work(exclusive=True, group="chats")
+    async def refresh_chats(self) -> None:
         try:
-            chats = self.app.client.get_chats()
+            chats = await self.app.client.get_chats()
         except Exception as e:
-            self.app.call_from_thread(self.app.notify, _format_exception(e), severity="error")
+            self.app.notify(_format_exception(e), severity="error")
             return
-        self.app.call_from_thread(self._apply_chats, chats)
+        self._apply_chats(chats)
 
     def _apply_chats(self, chats: list[dict]) -> None:
         lv = self.query_one("#chat-list", ListView)
@@ -169,17 +174,17 @@ class MainScreen(Screen):
         self.query_one("#message-input", Input).focus()
         self.load_history()
 
-    @work(thread=True, exclusive=True, group="history")
-    def load_history(self) -> None:
+    @work(exclusive=True, group="history")
+    async def load_history(self) -> None:
         if self.peer_id is None:
             return
         peer_id = self.peer_id
         try:
-            history = self.app.client.get_chat_history(peer_id)
+            history = await self.app.client.get_chat_history(peer_id)
         except Exception as e:
-            self.app.call_from_thread(self.app.notify, _format_exception(e), severity="error")
+            self.app.notify(_format_exception(e), severity="error")
             return
-        self.app.call_from_thread(self._apply_history, peer_id, history)
+        self._apply_history(peer_id, history)
 
     def _apply_history(self, peer_id: int, history: list[message.HistoryMessage]) -> None:
         if peer_id != self.peer_id:
@@ -208,17 +213,17 @@ class MainScreen(Screen):
         inp.value = ""
         self._check_user(peer_id)
 
-    @work(thread=True, group="check-user")
-    def _check_user(self, peer_id: int) -> None:
+    @work(group="check-user")
+    async def _check_user(self, peer_id: int) -> None:
         try:
-            exists = self.app.client.is_user_exists(peer_id)
+            exists = await self.app.client.is_user_exists(peer_id)
         except Exception as e:
-            self.app.call_from_thread(self.app.notify, _format_exception(e), severity="error")
+            self.app.notify(_format_exception(e), severity="error")
             return
         if not exists:
-            self.app.call_from_thread(self.app.notify, f"#{peer_id} не найден", severity="warning")
+            self.app.notify(f"#{peer_id} не найден", severity="warning")
             return
-        self.app.call_from_thread(self.open_chat, peer_id)
+        self.open_chat(peer_id)
 
     @on(Button.Pressed, "#send-btn")
     @on(Input.Submitted, "#message-input")
@@ -232,14 +237,14 @@ class MainScreen(Screen):
         inp.value = ""
         self._send_worker(text, self.peer_id)
 
-    @work(thread=True, group="send")
-    def _send_worker(self, text: str, recipient_id: int) -> None:
+    @work(group="send")
+    async def _send_worker(self, text: str, recipient_id: int) -> None:
         try:
-            self.app.client.send_message(text, recipient_id)
+            await self.app.client.send_message(text, recipient_id)
         except Exception as e:
-            self.app.call_from_thread(self.app.notify, _format_exception(e), severity="error")
+            self.app.notify(_format_exception(e), severity="error")
             return
-        self.app.call_from_thread(self._on_send_ok, text, recipient_id)
+        self._on_send_ok(text, recipient_id)
 
     def _on_send_ok(self, text: str, recipient_id: int) -> None:
         if recipient_id == self.peer_id:
@@ -259,14 +264,14 @@ class MainScreen(Screen):
     def _check_btn(self) -> None:
         self._check_msgs_worker()
 
-    @work(thread=True, exclusive=True, group="check-msgs")
-    def _check_msgs_worker(self) -> None:
+    @work(exclusive=True, group="check-msgs")
+    async def _check_msgs_worker(self) -> None:
         try:
-            msgs: list[message.Message] = self.app.client.check_messages()
+            msgs: list[message.Message] = await self.app.client.check_messages()
         except Exception as e:
-            self.app.call_from_thread(self.app.notify, _format_exception(e), severity="error")
+            self.app.notify(_format_exception(e), severity="error")
             return
-        self.app.call_from_thread(self._on_msgs, msgs)
+        self._on_msgs(msgs)
 
     def _on_msgs(self, msgs: list[message.Message]) -> None:
         if not msgs:
@@ -316,10 +321,15 @@ class MessengerApp(App):
     def on_mount(self) -> None:
         self.push_screen(AccountSelectScreen())
 
-    def enter_account(self, account_id: int, account_name: str) -> None:
-        self.client.open_session(account_id)
+    @work(exclusive=True, group="enter")
+    async def enter_account(self, account_id: int, account_name: str) -> None:
+        try:
+            await self.client.open_session(account_id)
+        except Exception as e:
+            self.notify(_format_exception(e), severity="error", title="Ошибка входа")
+            return
         self.switch_screen(MainScreen(account_id, account_name))
 
 
-def run(client) -> None:
-    MessengerApp(client).run()
+async def run(client) -> None:
+    await MessengerApp(client).run_async()
