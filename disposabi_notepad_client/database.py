@@ -13,27 +13,52 @@ from pathlib import Path
 from .schemas import user, message
 from .encryption.encryption import get_db_key
 
-class Database: 
+class Database:
     def __init__(self) -> None:
-        path = str(
-            Path(__file__).parent.parent / "data" / "database.db"
-        )
-        self._conn = aiosqlite.connect(
-            path, isolation_level=None, check_same_thread=False
-        )
-        self._initialized = False
-        
+        path = str(Path(__file__).parent.parent / "data" / "database.db")
+        self._path = path
+        self._conn: aiosqlite.Connection | None = None
+        self._init_lock = asyncio.Lock()
+        self._tx_lock = asyncio.Lock()
 
-    async def _ensure_initialized(self) -> None:
-        if not self._initialized:
-            await self._conn.__aenter__()
-            
-            self._conn.row_factory = sqlcipher3.dbapi2.Row
-            await self._conn.execute(f'''--sql
-                PRAGMA key = '{get_db_key()}'
-            ''')
-            self._initialized = True
+    async def _ensure_initialized(self) -> aiosqlite.Connection:
+        if self._conn is not None:
+            return self._conn
 
+        async with self._init_lock:
+            if self._conn is not None:
+                return self._conn
+
+            conn = await aiosqlite.connect(
+                self._path,
+                isolation_level=None,
+                check_same_thread=False,
+            )
+            conn.row_factory = sqlcipher3.dbapi2.Row
+            await conn.execute(f"PRAGMA key = '{get_db_key()}'")
+            await conn.execute("PRAGMA busy_timeout = 5000")
+            await conn.execute("PRAGMA journal_mode = WAL")
+            self._conn = conn
+            return conn
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncGenerator[aiosqlite.Connection, None]:
+        conn = await self._ensure_initialized()
+
+        async with self._tx_lock:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield conn
+            except BaseException:
+                await conn.execute("ROLLBACK")
+                raise
+            else:
+                await conn.execute("COMMIT")
+
+    async def close(self) -> None:
+        if self._conn is not None:
+            await self._conn.close()
+            self._conn = None
     
     @asynccontextmanager
     async def transaction(self) -> AsyncGenerator[aiosqlite.Connection, None, None]:

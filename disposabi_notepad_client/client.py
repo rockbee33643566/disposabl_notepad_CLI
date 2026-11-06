@@ -1,9 +1,13 @@
+import asyncio
 import time
+from collections.abc import Awaitable, Callable
 
 from . import utl
 from .database import Database, MessageRepo, ContactRepo, UserRepo
 from .api import ClientApi, UserAPI
 from .schemas import user, message
+
+POLLING_INTERVAL = 1.0
 
 
 class Client: 
@@ -17,8 +21,11 @@ class Client:
         self._api = client_api
         self._users = user_repo
         self._session: Session | None = None
+        self._polling_task: asyncio.Task | None = None
 
     async def open_session(self, local_id: int) -> None:
+        await self.stop_long_polling()
+
         hash = await self._users.get_user_hash(local_id)
         if hash is None:
             raise ValueError(f"Юзера с id - {local_id} не существует")
@@ -75,6 +82,32 @@ class Client:
 
     async def get_chat_history(self, peer_id: int) -> list[message.HistoryMessage]:
         return await self.session.messages.get_history(peer_id)
+
+    async def set_long_polling_callback(
+        self, call_back: Callable[[list[message.Message]], Awaitable[None]]
+    ) -> None:
+        await self.stop_long_polling()
+        self._polling_task = asyncio.create_task(self._polling_loop(call_back))
+
+    async def _polling_loop(
+        self, call_back: Callable[[list[message.Message]], Awaitable[None]]
+    ) -> None:
+        while True:
+            messages = await self.check_messages()
+            if messages:
+                await call_back(messages)
+            await asyncio.sleep(POLLING_INTERVAL)
+
+    async def stop_long_polling(self) -> None:
+        if self._polling_task is None:
+            return
+
+        self._polling_task.cancel()
+        try:
+            await self._polling_task
+        except asyncio.CancelledError:
+            pass
+        self._polling_task = None
 
 
 class Session: 

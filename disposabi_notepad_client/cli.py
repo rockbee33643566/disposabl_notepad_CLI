@@ -6,6 +6,7 @@ from typing import Optional
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import (
     Button, Footer, Header, Input, Label, ListItem, ListView, Static,
@@ -26,6 +27,12 @@ def _format_exception(e: BaseException) -> str:
         or getattr(getattr(e, "response", None), "status_code", None)
     )
     return f"HTTP {status}: {e}" if status is not None else f"{type(e).__name__}: {e}"
+
+
+class MessagesReceived(Message):
+    def __init__(self, messages: list[message.Message]) -> None:
+        super().__init__()
+        self.messages = messages
 
 
 class AccountItem(ListItem):
@@ -141,6 +148,29 @@ class MainScreen(Screen):
     def on_mount(self) -> None:
         self.app.title = f"Мессенджер — {self.user_name}"
         self.refresh_chats()
+        self.start_polling()
+
+    def on_unmount(self) -> None:
+        self._stop_polling()
+
+    def _stop_polling(self) -> None:
+        self.app.run_worker(
+            self.app.client.stop_long_polling(), group="polling-stop"
+        )
+
+    @work(exclusive=True, group="polling")
+    async def start_polling(self) -> None:
+        try:
+            await self.app.client.set_long_polling_callback(self._on_polled)
+        except Exception as e:
+            self.app.notify(_format_exception(e), severity="error", title="Ошибка полинга")
+
+    async def _on_polled(self, msgs: list[message.Message]) -> None:
+        self.post_message(MessagesReceived(msgs))
+
+    @on(MessagesReceived)
+    def _on_messages_received(self, event: MessagesReceived) -> None:
+        self._on_msgs(event.messages)
 
     @on(Button.Pressed, "#refresh-btn")
     def _refresh_btn(self) -> None:
@@ -288,6 +318,7 @@ class MainScreen(Screen):
             self.load_history()
 
     def action_logout(self) -> None:
+        self._stop_polling()
         self.app.switch_screen(AccountSelectScreen())
 
 
