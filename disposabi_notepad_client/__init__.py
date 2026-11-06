@@ -5,13 +5,13 @@ from . import (
 from .database import Database, UserRepo, init_db
 from .encryption import encryption
 from .api import ClientApi
-from .cli import CLI
 from .client import Client
+from .cli import run
 
 __all__ = [
     "ClientApi",
-    "CLI", 
     "Client", 
+    "run",
     "config",  
     "utl", 
     "encryption",

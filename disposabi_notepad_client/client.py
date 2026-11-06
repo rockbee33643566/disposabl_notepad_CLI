@@ -18,13 +18,13 @@ class Client:
         self._users = user_repo
         self._session: Session | None = None
 
-    def open_session(self, id: int) -> None:
-        hash = self._users.get_user_hash(id)
+    def open_session(self, local_id: int) -> None:
+        hash = self._users.get_user_hash(local_id)
         if hash is None:
-            raise ValueError(f"Юзера с id - {id} не существует")
+            raise ValueError(f"Юзера с id - {local_id} не существует")
         api = UserAPI(self._api.base_url, self._api.http, hash)
 
-        self._session = Session(self._db, api, id)
+        self._session = Session(self._db, api, local_id)
 
     @property
     def session(self) -> Session:
@@ -41,7 +41,7 @@ class Client:
         user_id = self._api.create_user(usr=usr)
         self._users.create_user(usr=usr, user_id=user_id)
 
-    def is_user_exists(self, user_id) -> bool:
+    def is_user_exists(self, user_id: int) -> bool:
         return self._api.is_user_exists(id=user_id)
 
     def get_accounts(self) -> user.Accounts | None:
@@ -50,47 +50,32 @@ class Client:
     def send_message(
         self, text: str, recipient_id: int
     ) -> None:
-        used_notepad = None
-        msg_for_db = message.SendedMessage(
-            text=text, 
-            recipient_id=recipient_id, 
-            used_notepad=used_notepad,
-            time=int(time.time())
-        )
-
         self.session.api.send_message(
             text=text,
             recipient_id=recipient_id, 
-            used_notepad=used_notepad
+            used_notepad=None
         )
-        self.session.messages.add_sendet_message(msg=msg_for_db)
+        self.session.messages.add_sendet_message(
+            message.SendedMessage(
+                text=text,
+                recipient_id=recipient_id,
+                used_notepad=None,
+                time=int(time.time())
+            )
+        )
 
-    def check_messages(self) -> message.MessagesGet | None:
-        messages = self.session.api.check_messages()
+    def check_messages(self) -> list[message.Message]:
+        result = self.session.api.check_messages()
+        if result.messages:
+            self.session.messages.add_received_messages(result.messages)
+        return result.messages
 
-        if not messages.messages: 
-            return None
+    def get_chats(self) -> list[dict]:
+        return self.session.messages.get_chats()
 
-        cont = self.session.contacts.get_contacts()
-        if cont is None: 
-            user_ids = []
-        else: 
-            user_ids = [i.user_id for i in cont.contacts]
+    def get_chat_history(self, peer_id: int) -> list[message.HistoryMessage]:
+        return self.session.messages.get_history(peer_id)
 
-        added_id = []
-
-        for m in messages.messages: 
-            if not m.sender_id in user_ids and not m.sender_id in added_id: 
-                self.add_chat(user_id=m.sender_id, name="Новый чат")
-                added_id.append(m.sender_id)
-
-        return messages
-
-    def add_chat(self, user_id: int, name: str) -> None: 
-        self.session.contacts.add_contact(user_id, name=name)
-
-    def get_chats(self) -> user.Contacts | None: 
-        return self.session.contacts.get_contacts()
 
 class Session: 
     def __init__(

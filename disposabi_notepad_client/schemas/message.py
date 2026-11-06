@@ -1,13 +1,16 @@
 from pydantic import BaseModel
 
+
 class Message(BaseModel):
     text: str
     sender_id: int
     used_notepad: int | None
     time: int
 
+
 class MessagesGet(BaseModel):
     messages: list[Message]
+
 
 class MessageSend(BaseModel):
     text: str
@@ -15,8 +18,18 @@ class MessageSend(BaseModel):
     recipient_id: int
     used_notepad: int | None
 
-class SendedMessage(BaseModel): 
-    text: str 
-    recipient_id: int 
+
+class SendedMessage(BaseModel):
+    text: str
+    recipient_id: int
     used_notepad: int | None
     time: int
+
+
+class HistoryMessage(BaseModel):
+    sender_id: int
+    recipient_id: int
+    text: str
+    used_notepad: int | None
+    time: int
+    is_readed: int

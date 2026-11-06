@@ -1,8 +1,8 @@
+import threading
+
 from sqlcipher3 import dbapi2
 
-from sqlite3 import Connection
 from contextlib import contextmanager
-from typing import Generator
 from pathlib import Path
 
 from .schemas import user, message
@@ -13,7 +13,10 @@ class Database:
         path = str(
             Path(__file__).parent.parent / "data" / "database.db"
         )
-        self._conn = dbapi2.connect(path, isolation_level=None)
+        self._lock = threading.RLock()
+        self._conn = dbapi2.connect(
+            path, isolation_level=None, check_same_thread=False
+        )
         self._conn.row_factory = dbapi2.Row
         self._conn.execute(f'''--sql
             PRAGMA key = '{get_db_key()}'
@@ -21,20 +24,22 @@ class Database:
     
     @contextmanager
     def transaction(self):
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield self._conn
-        except BaseException:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
             try:
-                self._conn.execute("ROLLBACK")
-            except Exception:
-                pass
-            raise
-        else:
-            self._conn.execute("COMMIT")
+                yield self._conn
+            except BaseException:
+                try:
+                    self._conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                raise
+            else:
+                self._conn.execute("COMMIT")
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
 class UserRepo:
     def __init__(self, db: Database) -> None:
@@ -68,12 +73,12 @@ class UserRepo:
             cursor.execute('''--sql
                 SELECT id, user_id, user_name, hash FROM users
             ''')
-            row = cursor.fetchall()
+            rows = cursor.fetchall()
 
-        if not row:
+        if not rows:
             return None
         else:
-            return user.Accounts(accounts=[dict(i) for i in row])
+            return user.Accounts(accounts=[dict(i) for i in rows])
 
 class ContactRepo:
     def __init__(self, db: Database, user_local_id: int) -> None:
@@ -100,26 +105,26 @@ class ContactRepo:
                 ''', 
                 (self.user_local_id, )
             )
-            row = cursor.fetchall()
+            rows = cursor.fetchall()
 
-        if not row: 
+        if not rows: 
             return None
         else: 
-            return user.Contacts(contacts=[dict(i) for i in row])
+            return user.Contacts(contacts=[dict(i) for i in rows])
 
 class MessageRepo:
     def __init__(self, db: Database, user_local_id: int) -> None:
         self.db = db
         self.user_local_id: int = user_local_id
 
-    def add_received_messages(self, msg: message.MessagesGet) -> None:
+    def add_received_messages(self, msgs: list[message.Message]) -> None:
         data = [
-            (msg.sender_id, 
+            (m.sender_id,
             self.user_local_id,
-            msg.text, 
-            msg.time, 
-            msg.used_notepad) 
-            for msg in msg.messages
+            m.text,
+            m.time,
+            m.used_notepad)
+            for m in msgs
         ]
 
         with self.db.transaction() as conn:
@@ -160,9 +165,67 @@ class MessageRepo:
                 data
             )
 
-    # AI
-    def get_history(self, peer_id: int) -> list[message.SendedMessage]:
-        pass 
+    def get_history(self, peer_id: int) -> list[message.HistoryMessage]:
+        with self.db.transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''--sql
+                SELECT sender_id, recipient_id, text, time, used_notepad, is_readed
+                FROM messages
+                WHERE (sender_id = ? AND recipient_id = ?)
+                   OR (sender_id = ? AND recipient_id = ?)
+                ORDER BY time ASC, id ASC
+                ''',
+                (self.user_local_id, peer_id, peer_id, self.user_local_id)
+            )
+            rows = cursor.fetchall()
+
+        return [message.HistoryMessage(**dict(r)) for r in rows]
+
+    def get_chats(self) -> list[dict]:
+        with self.db.transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''--sql
+                SELECT peer_id, MAX(time) AS last_time
+                FROM (
+                    SELECT recipient_id AS peer_id, time FROM messages
+                    WHERE sender_id = ?
+                    UNION ALL
+                    SELECT sender_id AS peer_id, time FROM messages
+                    WHERE recipient_id = ?
+                )
+                GROUP BY peer_id
+                ORDER BY last_time DESC
+                ''',
+                (self.user_local_id, self.user_local_id)
+            )
+            rows = cursor.fetchall()
+
+        chats = []
+        for row in rows:
+            peer_id = row["peer_id"]
+            last = self._last_message(peer_id)
+            chats.append({
+                "peer_id": peer_id,
+                "last_text": last["text"] if last else "",
+                "last_time": row["last_time"],
+            })
+        return chats
+
+    def _last_message(self, peer_id: int) -> dict | None:
+        with self.db.transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''--sql
+                SELECT text FROM messages
+                WHERE (sender_id = ? AND recipient_id = ?)
+                   OR (sender_id = ? AND recipient_id = ?)
+                ORDER BY time DESC, id DESC
+                LIMIT 1
+                ''',
+                (self.user_local_id, peer_id, peer_id, self.user_local_id)
+            )
+            row = cursor.fetchone()
+        return dict(row) if row else None
+
 
 def init_db(db: Database) -> None: 
     with db.transaction() as conn:
