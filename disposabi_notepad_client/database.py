@@ -1,8 +1,13 @@
-import threading
+import sqlcipher3
 
-from sqlcipher3 import dbapi2
+import sys
 
-from contextlib import contextmanager
+sys.modules["sqlite3"] = sqlcipher3
+import aiosqlite
+
+import asyncio
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 from pathlib import Path
 
 from .schemas import user, message
@@ -13,42 +18,49 @@ class Database:
         path = str(
             Path(__file__).parent.parent / "data" / "database.db"
         )
-        self._lock = threading.RLock()
-        self._conn = dbapi2.connect(
+        self._conn = aiosqlite.connect(
             path, isolation_level=None, check_same_thread=False
         )
-        self._conn.row_factory = dbapi2.Row
-        self._conn.execute(f'''--sql
-            PRAGMA key = '{get_db_key()}'
-        ''')
-    
-    @contextmanager
-    def transaction(self):
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                yield self._conn
-            except BaseException:
-                try:
-                    self._conn.execute("ROLLBACK")
-                except Exception:
-                    pass
-                raise
-            else:
-                self._conn.execute("COMMIT")
+        self._conn.row_factory = aiosqlite.Row
+        self._initialized = False
+        
 
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
+    async def _ensure_initialized(self) -> None:
+        if not self._initialized:
+            await self._conn.__aenter__()
+            await self._conn.execute(f'''--sql
+                PRAGMA key = '{get_db_key()}'
+            ''')
+            self._initialized = True
+
+    
+    @asynccontextmanager
+    async def transaction(self) -> AsyncGenerator[aiosqlite.Connection, None, None]:
+        await self._ensure_initialized()
+
+        await self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield self._conn
+        except BaseException:
+            try:
+                await self._conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        else:
+            await self._conn.execute("COMMIT")
+
+    async def close(self) -> None:
+        if self._initialized:
+            await self._conn.close()
 
 class UserRepo:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    def create_user(self, usr: user.CreateUserPost, user_id: int) -> None:
-        with self.db.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''--sql
+    async def create_user(self, usr: user.CreateUserPost, user_id: int) -> None:
+        async with self.db.transaction() as conn:
+            await conn.execute('''--sql
                 INSERT INTO users (user_id, user_name, hash)
                 VALUES
                     (?, ?, ?)
@@ -56,24 +68,24 @@ class UserRepo:
                 (user_id, usr.name, usr.hash)
             )
 
-    def get_user_hash(self, id: int) -> str | None:
-        with self.db.transaction() as conn: 
-            cursor = conn.cursor()
-            cursor.execute('''
+    async def get_user_hash(self, id: int) -> str | None:
+        async with self.db.transaction() as conn: 
+            cursor = await conn.cursor()
+            await cursor.execute('''
                 SELECT hash FROM users WHERE id = ?
                 ''',
                 (id, )
             )
-            row = cursor.fetchone()
+            row = await cursor.fetchone()
         return row["hash"] if row else None
 
-    def get_accounts(self) -> user.Accounts | None:
-        with self.db.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''--sql
+    async def get_accounts(self) -> user.Accounts | None:
+        async with self.db.transaction() as conn:
+            cursor = await conn.cursor()
+            await cursor.execute('''--sql
                 SELECT id, user_id, user_name, hash FROM users
             ''')
-            rows = cursor.fetchall()
+            rows = await cursor.fetchall()
 
         if not rows:
             return None
@@ -85,10 +97,9 @@ class ContactRepo:
         self.db = db
         self.user_local_id: int = user_local_id
 
-    def add_contact(self, user_id: int, name: str) -> None:
-        with self.db.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''--sql
+    async def add_contact(self, user_id: int, name: str) -> None:
+        async with self.db.transaction() as conn:
+            await conn.execute('''--sql
                 INSERT INTO contacts (master_id, user_id, name)
                 VALUES
                     (?, ?, ?)
@@ -96,16 +107,16 @@ class ContactRepo:
                 (self.user_local_id, user_id, name)
             )
 
-    def get_contacts(self) -> user.Contacts | None:
+    async def get_contacts(self) -> user.Contacts | None:
         with self.db.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''--sql
+            cursor = await conn.cursor()
+            await cursor.execute('''--sql
                 SELECT user_id, name FROM contacts 
                 WHERE master_id = ?
                 ''', 
                 (self.user_local_id, )
             )
-            rows = cursor.fetchall()
+            rows = await cursor.fetchall()
 
         if not rows: 
             return None
@@ -117,7 +128,7 @@ class MessageRepo:
         self.db = db
         self.user_local_id: int = user_local_id
 
-    def add_received_messages(self, msgs: list[message.Message]) -> None:
+    async def add_received_messages(self, msgs: list[message.Message]) -> None:
         data = [
             (m.sender_id,
             self.user_local_id,
@@ -127,9 +138,8 @@ class MessageRepo:
             for m in msgs
         ]
 
-        with self.db.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.executemany('''--sql
+        async with self.db.transaction() as conn:
+            await conn.executemany('''--sql
                 INSERT INTO messages (
                     sender_id, 
                     recipient_id,
@@ -143,14 +153,13 @@ class MessageRepo:
                 data
             )
 
-    def add_sendet_message(self, msg: message.SendedMessage) -> None:
+    async def add_sendet_message(self, msg: message.SendedMessage) -> None:
         data = [
             self.user_local_id, msg.recipient_id, msg.text, msg.time, msg.used_notepad, 1
         ]
 
-        with self.db.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''--sql
+        async with self.db.transaction() as conn:
+            await conn.execute('''--sql
                 INSERT INTO messages (
                     sender_id,
                     recipient_id, 
@@ -165,10 +174,10 @@ class MessageRepo:
                 data
             )
 
-    def get_history(self, peer_id: int) -> list[message.HistoryMessage]:
-        with self.db.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''--sql
+    async def get_history(self, peer_id: int) -> list[message.HistoryMessage]:
+        async with self.db.transaction() as conn:
+            cursor = await conn.cursor()
+            await cursor.execute('''--sql
                 SELECT sender_id, recipient_id, text, time, used_notepad, is_readed
                 FROM messages
                 WHERE (sender_id = ? AND recipient_id = ?)
@@ -177,14 +186,14 @@ class MessageRepo:
                 ''',
                 (self.user_local_id, peer_id, peer_id, self.user_local_id)
             )
-            rows = cursor.fetchall()
+            rows = await cursor.fetchall()
 
         return [message.HistoryMessage(**dict(r)) for r in rows]
 
-    def get_chats(self) -> list[dict]:
-        with self.db.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''--sql
+    async def get_chats(self) -> list[dict]:
+        async with self.db.transaction() as conn:
+            cursor = await conn.cursor()
+            await cursor.execute('''--sql
                 SELECT peer_id, MAX(time) AS last_time
                 FROM (
                     SELECT recipient_id AS peer_id, time FROM messages
@@ -198,22 +207,29 @@ class MessageRepo:
                 ''',
                 (self.user_local_id, self.user_local_id)
             )
-            rows = cursor.fetchall()
+            rows = await cursor.fetchall()
 
-        chats = []
-        for row in rows:
-            peer_id = row["peer_id"]
-            last = self._last_message(peer_id)
-            chats.append({
-                "peer_id": peer_id,
-                "last_text": last["text"] if last else "",
-                "last_time": row["last_time"],
-            })
+        async with asyncio.TaskGroup() as tg:
+            tasks = tuple(
+                tg.create_task(coro=self._create_chat(row)) for row in rows
+            )
+
+        chats = await asyncio.gather(*tasks)
+
         return chats
 
-    def _last_message(self, peer_id: int) -> dict | None:
-        with self.db.transaction() as conn:
-            cursor = conn.cursor()
+    async def _create_chat(self, row) -> dict: 
+        peer_id = row["peer_id"]
+        last = await self._last_message(peer_id)
+        return {
+            "peer_id": peer_id,
+            "last_text": last["text"] if last else "",
+            "last_time": row["last_time"],
+        }
+
+    async def _last_message(self, peer_id: int) -> dict | None:
+        async with self.db.transaction() as conn:
+            cursor = await conn.cursor()
             cursor.execute('''--sql
                 SELECT text FROM messages
                 WHERE (sender_id = ? AND recipient_id = ?)
@@ -223,13 +239,12 @@ class MessageRepo:
                 ''',
                 (self.user_local_id, peer_id, peer_id, self.user_local_id)
             )
-            row = cursor.fetchone()
+            row = await cursor.fetchone()
         return dict(row) if row else None
 
-
-def init_db(db: Database) -> None: 
-    with db.transaction() as conn:
-        conn.execute('''--sql
+async def init_db(db: Database) -> None: 
+    async with db.transaction() as conn:
+        await conn.execute('''--sql
             CREATE TABLE IF NOT EXISTS 
                 users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,7 +254,7 @@ def init_db(db: Database) -> None:
                 )
         ''')
 
-        conn.execute('''--sql
+        await conn.execute('''--sql
             CREATE TABLE IF NOT EXISTS
                 messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -252,7 +267,7 @@ def init_db(db: Database) -> None:
                 )
         ''')
 
-        conn.execute('''--sql
+        await conn.execute('''--sql
             CREATE TABLE IF NOT EXISTS
                 contacts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, 

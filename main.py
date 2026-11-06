@@ -1,3 +1,5 @@
+import asyncio
+
 from disposabi_notepad_client import (
     config,
     utl,
@@ -11,7 +13,7 @@ from disposabi_notepad_client import (
 from disposabi_notepad_client import run
 
 
-def main():
+async def main():
     utl.init_file_system()
     conf = config.get_config()
 
@@ -19,14 +21,14 @@ def main():
         first_launch()
 
     db = Database()
-    init_db(db=db)
+    await init_db(db=db)
     user_repo = UserRepo(db)
 
     api = ClientApi(conf.host)
     client = Client(api, db, user_repo)
 
     try:
-        run(client)
+        await run(client)
     finally:
         conf.first_launch = False
         config.edit_config(conf)
@@ -37,4 +39,4 @@ def first_launch():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

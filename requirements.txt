@@ -1,5 +1,6 @@
 pydantic
-requests
-sqlcipher3
+aiohttp
+sqlcipher3-wheels
+aiosqlite
 keyring
 textual
