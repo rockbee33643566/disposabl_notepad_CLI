@@ -12,7 +12,10 @@ from textual.widgets import (
     Button, Footer, Header, Input, Label, ListItem, ListView, Static,
 )
 
+from . import logger
 from .schemas import user, message
+
+_log = logger.get_logger()
 
 
 def _fmt_time(ts: int | None) -> str:
@@ -77,6 +80,7 @@ class AccountSelectScreen(Screen):
         try:
             accounts: Optional[user.Accounts] = await self.app.client.get_accounts()
         except Exception as e:
+            await _log.error(f"Ошибка получения списка аккаунтов: {e}")
             self.app.notify(_format_exception(e), severity="error", title="Ошибка аккаунтов")
             return
 
@@ -101,6 +105,7 @@ class AccountSelectScreen(Screen):
         try:
             await self.app.client.create_user(name)
         except Exception as e:
+            await _log.error(f"Ошибка создания аккаунта name={name!r}: {e}")
             self.app.notify(_format_exception(e), severity="error", title="Ошибка создания")
             return
         self.query_one("#new-name", Input).value = ""
@@ -163,6 +168,7 @@ class MainScreen(Screen):
         try:
             await self.app.client.set_long_polling_callback(self._on_polled)
         except Exception as e:
+            await _log.error(f"Ошибка запуска длинного полинга: {e}")
             self.app.notify(_format_exception(e), severity="error", title="Ошибка полинга")
 
     async def _on_polled(self, msgs: list[message.Message]) -> None:
@@ -181,6 +187,7 @@ class MainScreen(Screen):
         try:
             chats = await self.app.client.get_chats()
         except Exception as e:
+            await _log.error(f"Ошибка получения списка чатов: {e}")
             self.app.notify(_format_exception(e), severity="error")
             return
         self._apply_chats(chats)
@@ -212,6 +219,7 @@ class MainScreen(Screen):
         try:
             history = await self.app.client.get_chat_history(peer_id)
         except Exception as e:
+            await _log.error(f"Ошибка загрузки истории чата peer_id={peer_id}: {e}")
             self.app.notify(_format_exception(e), severity="error")
             return
         self._apply_history(peer_id, history)
@@ -248,6 +256,7 @@ class MainScreen(Screen):
         try:
             exists = await self.app.client.is_user_exists(peer_id)
         except Exception as e:
+            await _log.error(f"Ошибка проверки пользователя peer_id={peer_id}: {e}")
             self.app.notify(_format_exception(e), severity="error")
             return
         if not exists:
@@ -272,6 +281,7 @@ class MainScreen(Screen):
         try:
             await self.app.client.send_message(text, recipient_id)
         except Exception as e:
+            await _log.error(f"Ошибка отправки сообщения получателю id={recipient_id}: {e}")
             self.app.notify(_format_exception(e), severity="error")
             return
         self._on_send_ok(text, recipient_id)
@@ -299,6 +309,7 @@ class MainScreen(Screen):
         try:
             msgs: list[message.Message] = await self.app.client.check_messages()
         except Exception as e:
+            await _log.error(f"Ошибка проверки новых сообщений: {e}")
             self.app.notify(_format_exception(e), severity="error")
             return
         self._on_msgs(msgs)
@@ -357,6 +368,7 @@ class MessengerApp(App):
         try:
             await self.client.open_session(account_id)
         except Exception as e:
+            await _log.error(f"Ошибка входа в аккаунт id={account_id}: {e}")
             self.notify(_format_exception(e), severity="error", title="Ошибка входа")
             return
         self.switch_screen(MainScreen(account_id, account_name))

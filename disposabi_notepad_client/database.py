@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from pathlib import Path
 
+from . import logger
 from .schemas import user, message
 from .encryption.encryption import get_db_key
 
@@ -20,6 +21,7 @@ class Database:
         self._conn: aiosqlite.Connection | None = None
         self._init_lock = asyncio.Lock()
         self._tx_lock = asyncio.Lock()
+        self._log = logger.get_logger()
 
     async def _ensure_initialized(self) -> aiosqlite.Connection:
         if self._conn is not None:
@@ -39,6 +41,7 @@ class Database:
             await conn.execute("PRAGMA busy_timeout = 5000")
             await conn.execute("PRAGMA journal_mode = WAL")
             self._conn = conn
+            await self._log.info(f"Подключение к базе данных открыто: {self._path}")
             return conn
 
     @asynccontextmanager
@@ -59,10 +62,12 @@ class Database:
         if self._conn is not None:
             await self._conn.close()
             self._conn = None
+            await self._log.info("Подключение к базе данных закрыто")
 
 class UserRepo:
     def __init__(self, db: Database) -> None:
         self.db = db
+        self._log = logger.get_logger()
 
     async def create_user(self, usr: user.CreateUserPost, user_id: int) -> None:
         async with self.db.transaction() as conn:
@@ -73,6 +78,7 @@ class UserRepo:
                 ''', 
                 (user_id, usr.name, usr.hash)
             )
+        await self._log.info(f"Пользователь сохранён в локальную базу id={user_id}")
 
     async def get_user_hash(self, id: int) -> str | None:
         async with self.db.transaction() as conn: 
@@ -102,6 +108,7 @@ class ContactRepo:
     def __init__(self, db: Database, user_local_id: int) -> None:
         self.db = db
         self.user_local_id: int = user_local_id
+        self._log = logger.get_logger()
 
     async def add_contact(self, user_id: int, name: str) -> None:
         async with self.db.transaction() as conn:
@@ -112,6 +119,7 @@ class ContactRepo:
                 ''',
                 (self.user_local_id, user_id, name)
             )
+        await self._log.info(f"Контакт добавлен user_id={user_id} name={name!r}")
 
     async def get_contacts(self) -> user.Contacts | None:
         with self.db.transaction() as conn:
@@ -133,6 +141,7 @@ class MessageRepo:
     def __init__(self, db: Database, user_local_id: int) -> None:
         self.db = db
         self.user_local_id: int = user_local_id
+        self._log = logger.get_logger()
 
     async def add_received_messages(self, msgs: list[message.Message]) -> None:
         data = [
@@ -158,6 +167,7 @@ class MessageRepo:
                 ''',
                 data
             )
+        await self._log.info(f"Входящих сообщений сохранено в базу: {len(data)}")
 
     async def add_sendet_message(self, msg: message.SendedMessage) -> None:
         data = [
@@ -179,16 +189,24 @@ class MessageRepo:
                 ''',
                 data
             )
+        await self._log.info(f"Исходящее сообщение сохранено в базу получателю id={msg.recipient_id}")
 
     async def get_history(self, peer_id: int) -> list[message.HistoryMessage]:
         async with self.db.transaction() as conn:
             cursor = await conn.cursor()
             await cursor.execute('''--sql
-                SELECT sender_id, recipient_id, text, time, used_notepad, is_readed
+                SELECT
+                    sender_id,
+                    recipient_id,
+                    text,
+                    time,
+                    used_notepad,
+                    MAX(is_readed) AS is_readed
                 FROM messages
                 WHERE (sender_id = ? AND recipient_id = ?)
                    OR (sender_id = ? AND recipient_id = ?)
-                ORDER BY time ASC, id ASC
+                GROUP BY sender_id, recipient_id, text, time, used_notepad
+                ORDER BY time ASC, MIN(id) ASC
                 ''',
                 (self.user_local_id, peer_id, peer_id, self.user_local_id)
             )
@@ -282,3 +300,4 @@ async def init_db(db: Database) -> None:
                     name TEXT
                 )
         ''')
+    await logger.get_logger().info("Схема базы данных инициализирована")

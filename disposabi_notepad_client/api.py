@@ -2,12 +2,14 @@ from aiohttp import ClientSession
 
 import asyncio
 
+from . import logger
 from .schemas import user, message
 
 class ClientApi:
     def __init__(self, base_url: str):
         self.base_url = base_url
         self.http = ClientSession()
+        self._log = logger.get_logger()
 
     async def create_user(self, usr: user.CreateUserPost) -> int: 
         path = "/user/create"
@@ -20,6 +22,7 @@ class ClientApi:
 
             data = await response.json()
 
+        await self._log.info(f"Аккаунт создан на сервере name={usr.name!r} id={data}")
         return data
 
     async def is_user_exists(self, id: int) -> bool:
@@ -34,6 +37,7 @@ class ClientApi:
 
             data = await response.json()
 
+        await self._log.info(f"Проверка существования пользователя id={id}: {data}")
         return data
 
 class UserAPI:
@@ -45,6 +49,7 @@ class UserAPI:
         self.base_url = base_url
         self._user_hash = user_hash
         self.http = http
+        self._log = logger.get_logger()
 
     async def send_message(self, text: str, recipient_id: int, used_notepad: int | None) -> None:
         path = "/message/send"
@@ -62,6 +67,8 @@ class UserAPI:
         ) as response:
             response.raise_for_status()
 
+        await self._log.info(f"Запрос на отправку сообщения получателю id={recipient_id} выполнен")
+
     async def check_messages(self) -> message.MessagesGet: 
         path = "/message/get"
         params = {"user_hash": self._user_hash}
@@ -74,4 +81,6 @@ class UserAPI:
 
             data = await response.json()
 
-        return message.MessagesGet.model_validate(data)
+        result = message.MessagesGet.model_validate(data)
+        await self._log.info(f"Запрос новых сообщений выполнен, получено={len(result.messages)}")
+        return result

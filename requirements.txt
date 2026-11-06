@@ -4,3 +4,5 @@ sqlcipher3-wheels
 aiosqlite
 keyring
 textual
+aiologger
+aiofiles

@@ -1,6 +1,7 @@
 from . import (
     config,  
-    utl
+    utl,
+    logger
 )
 from .database import Database, UserRepo, init_db
 from .encryption import encryption
@@ -14,6 +15,7 @@ __all__ = [
     "run",
     "config",  
     "utl", 
+    "logger",
     "encryption",
     "Database",
     "init_db",
