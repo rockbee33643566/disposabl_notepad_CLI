@@ -19,6 +19,8 @@ async def main():
 
     if conf.first_launch:
         first_launch()
+        conf.first_launch = False
+        config.edit_config(conf)
 
     db = Database()
     await init_db(db=db)
@@ -30,8 +32,8 @@ async def main():
     try:
         await run(client)
     finally:
-        conf.first_launch = False
-        config.edit_config(conf)
+        await db.close()
+        await api.http.close()
 
 
 def first_launch():

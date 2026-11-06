@@ -59,26 +59,6 @@ class Database:
         if self._conn is not None:
             await self._conn.close()
             self._conn = None
-    
-    @asynccontextmanager
-    async def transaction(self) -> AsyncGenerator[aiosqlite.Connection, None, None]:
-        await self._ensure_initialized()
-
-        await self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield self._conn
-        except BaseException:
-            try:
-                await self._conn.execute("ROLLBACK")
-            except Exception:
-                pass
-            raise
-        else:
-            await self._conn.execute("COMMIT")
-
-    async def close(self) -> None:
-        if self._initialized:
-            await self._conn.close()
 
 class UserRepo:
     def __init__(self, db: Database) -> None:

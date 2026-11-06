@@ -21,11 +21,14 @@ def encrypt_text(notepad: list[int], text):
 def decode(): 
     pass
 
-def get_db_key(): 
+def get_db_key() -> str | None:
     key = keyring.get_password("database_key", "disposabl_notepad_mess")
     return key
 
-def generate_db_key(): 
+def generate_db_key() -> None:
+    if get_db_key() is not None:
+        return
+
     key_hex = str(uuid.uuid4())
 
     keyring.set_password("database_key", "disposabl_notepad_mess", key_hex)
